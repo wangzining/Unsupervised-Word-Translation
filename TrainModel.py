@@ -5,7 +5,7 @@ from torch.nn import functional as F
 
 class TrainModel(object):
 
-    def __init__(self, src_emb, tgt_emb, mapping, discriminator, src_dic,tgt_dic, optim_fn, lr):
+    def __init__(self, src_emb, tgt_emb, mapping, discriminator, src_dic,tgt_dic, optim_fn, lr, param_list):
         """
         Initialize trainer script.
         """
@@ -15,6 +15,7 @@ class TrainModel(object):
         self.tgt_dic = tgt_dic
         self.mapping = mapping
         self.discriminator = discriminator
+        self.param_list = param_list
 
         # optimizers
         if optim_fn == 'sgd':
@@ -97,3 +98,32 @@ class TrainModel(object):
         loss.backward()
         self.dis_optimizer.step()
 #         clip_parameters(self.discriminator, dis_clip_weights)
+
+    def mapping_step(self, stats, batch_size = 32):
+        
+        self.discriminator.eval()  #run python code within itself
+        # loss
+        x, y = self.get_dis_xy(volatile=False)
+        preds = self.discriminator(x)
+        loss = F.binary_cross_entropy(preds, 1 - y)
+        loss = self.param_list.feedback_coeff * loss
+
+        # check NaN
+        if (loss != loss).data.any():
+            print("NaN detected (fool discriminator)")
+            #exit()
+
+        # optim
+        self.map_optimizer.zero_grad()
+        loss.backward()
+        self.map_optimizer.step()
+        #self.orthogonalize()
+        # orthogonalize:
+        if self.param_list.map_beta > 0:
+            W = self.mapping.weight.data
+            beta = self.param_list.map_beta
+            W.copy_((1 + beta) * W - beta * W.mm(W.transpose(0, 1).mm(W)))
+
+        return 2 * self.param_list.batch_size_adv
+
+        
